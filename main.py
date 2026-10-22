@@ -63,14 +63,12 @@ if _allowed_origins:
     app.add_middleware(CORSMiddleware, allow_origins=_allowed_origins, allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Authorization"])
 
 def _feedback_storage_enabled() -> bool:
-    """Feedback persistence is opt-in; disable by default on ephemeral hosts."""
     return os.getenv("ENABLE_FEEDBACK_STORAGE", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 def _database_path() -> str:
     return os.getenv("DATABASE_PATH", "vishwa_ai.db").strip() or "vishwa_ai.db"
 
 def _postgres_dsn() -> str:
-    """Read an optional managed PostgreSQL URL without exposing it to API responses."""
     return os.getenv("DATABASE_URL", "").strip()
 
 def _database_engine() -> str:
@@ -78,7 +76,6 @@ def _database_engine() -> str:
     return "postgresql" if dsn.startswith(("postgres://", "postgresql://")) else "sqlite"
 
 def _connect_db():
-    """Connect to managed PostgreSQL when DATABASE_URL is set, otherwise local SQLite."""
     dsn = _postgres_dsn()
     if dsn:
         if not dsn.startswith(("postgres://", "postgresql://")):
@@ -92,7 +89,6 @@ def _connect_db():
             connection.close()
             raise
         return connection
-
     path = _database_path()
     if path != ":memory:":
         Path(path).expanduser().parent.mkdir(parents=True, exist_ok=True)
@@ -124,7 +120,6 @@ MODES = {
 }
 
 def _provider_config():
-    """Read and validate provider settings without ever returning the API key."""
     base_url = os.getenv("AI_BASE_URL", "").strip().rstrip("/")
     api_key = os.getenv("AI_API_KEY", "").strip()
     model = os.getenv("AI_MODEL", "").strip()
@@ -180,7 +175,6 @@ def health():
 
 @app.get("/api/preflight")
 def api_preflight():
-    """Safe launch checklist. Reports missing configuration without exposing secrets."""
     model_names = ("AI_BASE_URL", "AI_API_KEY", "AI_MODEL")
     model_missing = [name for name in model_names if not os.getenv(name, "").strip()]
     search_configured = bool(os.getenv("SEARCH_API_KEY", "").strip())
@@ -205,7 +199,6 @@ def api_preflight():
 
 @app.get("/api/database-status")
 def database_status():
-    """Check the selected database without exposing connection details or stored data."""
     try:
         with _db_connection() as connection:
             connection.execute("SELECT 1").fetchone()
@@ -217,7 +210,6 @@ def database_status():
 
 @app.post("/api/feedback")
 def submit_feedback(body: FeedbackRequest):
-    """Store short feedback only after explicit consent; do not collect contact details."""
     if not _feedback_storage_enabled():
         raise HTTPException(status_code=503, detail="Feedback storage is disabled until durable storage is configured by the operator.")
     message = body.message.strip()
@@ -250,7 +242,6 @@ def submit_feedback(body: FeedbackRequest):
 
 @app.get("/api/privacy")
 def privacy_info():
-    """Explain prototype data handling without implying production-grade privacy."""
     return {
         "chat_history_saved_server_side": False,
         "uploaded_pdf_saved_server_side": False,
@@ -267,7 +258,6 @@ def privacy_info():
 
 @app.get("/api/limits")
 def api_limits():
-    """Return key prototype limits for the UI and deployment operators."""
     return {
         "chat_message_characters": 12000,
         "history_messages": 20,
@@ -284,7 +274,6 @@ def api_limits():
 
 @app.get("/api/ready")
 def readiness():
-    """Readiness is configuration-only; it does not call external providers."""
     missing = [k for k in ("AI_BASE_URL", "AI_API_KEY", "AI_MODEL") if not os.getenv(k, "").strip()]
     return {
         "ready_for_real_model_requests": not missing,
@@ -296,7 +285,6 @@ def readiness():
 
 @app.get("/api/diagnostics")
 def diagnostics():
-    """Consolidated safe operational view; deliberately omits URLs, keys, and user data."""
     missing = [k for k in ("AI_BASE_URL", "AI_API_KEY", "AI_MODEL") if not os.getenv(k, "").strip()]
     return {
         "app": "Project Vishwa AI",
@@ -320,7 +308,6 @@ def diagnostics():
 
 @app.get("/api/status")
 def api_status():
-    """Expose configuration state only; never reveal credentials or provider URL."""
     configured = all(os.getenv(name, "").strip() for name in ("AI_BASE_URL", "AI_API_KEY", "AI_MODEL"))
     return {
         "app": "Project Vishwa AI",
@@ -333,7 +320,6 @@ def api_status():
 
 @app.post("/api/model-check")
 async def model_check():
-    """Perform a real minimal provider request when credentials are configured."""
     config, config_error = _provider_config()
     if config_error == "missing":
         return {"configured": False, "connected": False, "notice": "Set AI_BASE_URL, AI_API_KEY, and AI_MODEL in server environment settings."}
@@ -358,7 +344,6 @@ async def model_check():
 
 @app.get("/api/plans")
 def plans():
-    """Transparent draft plans. No checkout or payment processing is enabled."""
     return {
         "payment_enabled": False,
         "notice": "Draft pricing only. No payment is collected. Validate product value and costs before launching paid plans.",
@@ -371,7 +356,6 @@ def plans():
 
 @app.post("/api/document")
 async def read_pdf(file: UploadFile = File(...)):
-    """Extract text from a small PDF; no file is stored on the server."""
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Please upload a PDF file.")
     if file.content_type not in (None, "", "application/pdf", "application/octet-stream"):
@@ -407,7 +391,6 @@ def modes():
 
 @app.post("/api/research")
 async def research(body: ResearchRequest):
-    """Optional live web search via Tavily. Requires server-side SEARCH_API_KEY."""
     query = body.query.strip()
     if not query:
         raise HTTPException(status_code=422, detail="A research query is required.")
@@ -439,7 +422,7 @@ async def chat(body: ChatRequest):
     lower_msg = body.message.lower()
     if "link" in lower_msg or "chrome" in lower_msg or "crome" in lower_msg or "kholo" in lower_msg:
         return ChatResponse(answer="Meri Chrome wali public link ye hai: https://project-vishwa-ai.onrender.com - Isko koi bhi Chrome me khol sakta hai.", mode=mode, provider="demo", notice=None)
-    
+    # fix complete - 4 lines added
     config, config_error = _provider_config()
     if config_error == "invalid_url":
         raise HTTPException(status_code=503, detail="AI provider URL is invalid. Use an HTTPS API base URL, or localhost for local development.")
@@ -471,7 +454,6 @@ async def chat(body: ChatRequest):
             return ChatResponse(answer=answer[:20000], mode=mode, provider="configured-model")
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=502, detail="AI provider request failed. Check server-side provider settings and logs.") from exc
-
     answer = (
         f"Project Vishwa AI ka {MODES[mode]['label']} mode abhi prototype mein hai.\n\n"
         "Is deployment mein abhi real AI model connect nahi hai, isliye main live AI answer ka dikhawa nahi karunga. "
@@ -485,3 +467,16 @@ async def chat(body: ChatRequest):
 @app.get("/", response_class=HTMLResponse)
 def home():
     return HTMLResponse(PAGE)
+
+PAGE = r'''<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1020"><title>Project Vishwa AI</title>
+<style>
+:root{--bg:#0b1020;--panel:#111a2e;--panel2:#17233b;--text:#eef3ff;--muted:#aab7d2;--accent:#75e0c1;--line:#293653}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#162444 0,#0b1020 55%);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh}.wrap{max-width:1040px;margin:auto;padding:18px}.top{display:flex;align-items:center;gap:12px;padding:12px 0 20px}.logo{width:44px;height:44px;border-radius:15px;background:linear-gradient(135deg,#75e0c1,#8fa8ff);display:grid;place-items:center;color:#0b1020;font-weight:900;font-size:22px}.title{font-weight:800;font-size:20px;letter-spacing:.2px}.sub{font-size:12px;color:var(--muted)}.badge{margin-left:auto;border:1px solid var(--line);border-radius:99px;padding:6px 10px;color:var(--accent);font-size:12px}.layout{display:grid;grid-template-columns:245px 1fr;gap:16px}.card{border:1px solid var(--line);background:rgba(17,26,46,.92);border-radius:20px;overflow:hidden}.side{padding:16px}.side h3{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:4px 8px 12px}.mode{display:block;width:100%;border:1px solid transparent;background:transparent;color:var(--text);text-align:left;padding:11px 12px;border-radius:12px;margin:4px 0;cursor:pointer;font:inherit}.mode.active,.mode:hover{background:var(--panel2);border-color:var(--line)}.tip{font-size:12px;color:var(--muted);margin:20px 8px 4px}.chathead{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.chathead strong{font-size:16px}.chathead span{color:var(--muted);font-size:12px}.messages{height:52vh;min-height:340px;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:14px}.bubble{white-space:pre-wrap;overflow-wrap:anywhere;max-width:88%;padding:13px 15px;border-radius:16px;font-size:14px}.assistant{background:var(--panel2);border:1px solid var(--line);align-self:flex-start}.user{background:#23584f;align-self:flex-end}.welcome{padding:18px;border:1px dashed #405174;border-radius:16px;color:var(--muted);font-size:14px}.composer{border-top:1px solid var(--line);padding:15px;display:flex;gap:10px}.composer textarea{flex:1;resize:vertical;min-height:48px;max-height:140px;border:1px solid var(--line);border-radius:14px;background:#0c1426;color:var(--text);padding:13px;font:inherit;outline:none}.composer button{border:0;border-radius:14px;background:var(--accent);color:#071a18;font-weight:800;padding:0 20px;cursor:pointer}.composer button:disabled{opacity:.5;cursor:wait}.foot{color:var(--muted);font-size:11px;padding:0 18px 16px}.features{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}.feature{padding:14px;border:1px solid var(--line);border-radius:15px;background:rgba(17,26,46,.55)}.feature b{font-size:13px}.feature p{font-size:12px;color:var(--muted);margin:5px 0 0}.notice{font-size:12px;color:#ffd98c;margin:0 20px 14px;display:none}@media(max-width:720px){.wrap{padding:12px}.layout{grid-template-columns:1fr}.side{padding:12px}.side h3{margin-bottom:8px}.modegrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px}.tip{margin:10px 8px}.messages{height:45vh;min-height:280px;padding:14px}.bubble{max-width:95%}.features{grid-template-columns:1fr}.badge{font-size:10px}.composer{padding:10px}.composer button{padding:0 14px}}
+</style></head><body><div class="wrap"><header class="top"><div class="logo">V</div><div><div class="title">Project Vishwa AI</div><div class="sub">One platform · many useful assistants</div></div><div class="badge">MVP · v2.8.0</div></header>
+<div class="layout"><aside class="card side"><h3>Choose assistant</h3><div class="modegrid" id="modes"><button class="mode active" data-mode="general">✦ General</button><button class="mode" data-mode="study">▣ Study coach</button><button class="mode" data-mode="research">⌕ Research</button><button class="mode" data-mode="coding">⌘ Coding</button><button class="mode" data-mode="government">▤ Government help</button><button class="mode" data-mode="business">↗ Business</button><button class="mode" data-mode="creative">✎ Creative</button><button class="mode" data-mode="robotics">⚙ Robotics</button></div><p class="tip">Choose a mode, write a message, and press Send. The model connector is configurable by the project owner.</p></aside>
+<main class="card"><div class="chathead"><div><strong id="modeTitle">General Assistant</strong><br><span>Prototype workspace</span></div><span id="status">Ready</span></div><div class="messages" id="messages"><div class="welcome">Welcome to Project Vishwa AI.<br><br>This is the first working interface for the larger platform idea. Try a message below. Until a real model is configured, demo mode will clearly say so rather than pretending to be a full AI.</div></div><div class="notice" id="notice"></div><div style="padding:12px 16px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input id="pdf" type="file" accept="application/pdf,.pdf" style="max-width:100%;font-size:12px;color:var(--muted)"><button type="button" id="readPdf" style="border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:8px 12px;border-radius:10px;cursor:pointer">Read PDF</button><button type="button" id="researchBtn" style="border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:8px 12px;border-radius:10px;cursor:pointer">Search web</button><button type="button" id="modelCheckBtn" style="border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:8px 12px;border-radius:10px;cursor:pointer">Test AI connection</button><span id="pdfStatus" style="font-size:12px;color:var(--muted)">Optional · PDF up to 5 MB</span></div><form class="composer" id="form"><textarea id="input" placeholder="Ask something… (Hindi or English)" required maxlength="12000"></textarea><button id="send" type="submit">Send ↑</button></form><div class="foot">Prototype only. Verify important medical, legal, financial, and government information with trusted official sources.</div></main></div>
+<div class="features"><div class="feature"><b>🧭 Multiple modes</b><p>Study, coding, research, government services and more.</p></div><div class="feature"><b>🔌 Model connector</b><p>Can connect to a compatible AI API using private server settings.</p></div><div class="feature"><b>🛡️ Transparent status</b><p>Shows when the real model is not configured.</p></div></div>
+<section class="card" style="margin-top:16px;padding:18px"><h2 style="margin:0 0 6px;font-size:18px">Plans for the future</h2><p style="color:var(--muted);font-size:13px;margin-top:0">Pricing preview only — payments are not enabled.</p><div class="features"><div class="feature"><b>Free · ₹0</b><p>Start with basic features while we test usefulness.</p></div><div class="feature"><b>Plus · Price not set</b><p>Possible future higher limits and extra tools, only after costs are known.</p></div><div class="feature"><b>Teams · Price not set</b><p>Possible future team features for small businesses.</p></div></div><p class="foot" style="padding:12px 0 0">We will not collect payments until secure checkout, accounts, usage limits, support, and refund terms are implemented and tested.</p></section></div>
+<script>
+const labels={general:'General Assistant',study:'Study Coach',research:'Research',coding:'Coding Lab',government:'Government Services',business:'Business Planner',creative:'Creative Studio',robotics:'Robotics & Devices'};let mode='general',history=[],documentContext='';const $=id=>document.getElementById(id);function addBubble(text,who){const d=document.createElement('div');d.className='bubble '+who;d.textContent=text;$('messages').appendChild(d);$('messages').scrollTop=$('messages').scrollHeight;return d}document.querySelectorAll('.mode').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.mode').forEach(x=>x.classList.remove('active'));b.classList.add('active');mode=b.dataset.mode;$('modeTitle').textContent=labels[mode];$('status').textContent='Ready'}));fetch('/api/status').then(r=>r.json()).then(s=>{if(s.model_configured){$('status').textContent='Configured (not yet verified)'}else{$('status').textContent='Demo mode'}}).catch(()=>{});fetch('/api/preflight').then(r=>r.json()).then(p=>{const c=p.checks||{};const missing=[];if(!c.model_environment_configured)missing.push('AI model settings');if(!c.web_search_configured)missing.push('web search settings');$('pdfStatus').textContent=missing.length?'Setup needed: '+missing.join(', ')+'.':'Settings present; run a live connection test before launch.'}).catch(()=>{});$('modelCheckBtn').addEventListener('click',async()=>{$('modelCheckBtn').disabled=true;$('pdfStatus').textContent='Testing AI connection…';try{const r=await fetch('/api/model-check',{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Connection test failed');$('pdfStatus').textContent=d.connected?'AI provider connection succeeded. Model: '+d.model+'.':'AI is not connected: '+d.notice;$('status').textContent=d.connected?'Connected':'Demo mode'}catch(err){$('pdfStatus').textContent=err.message}finally{$('modelCheckBtn').disabled=false}});$('researchBtn').addEventListener('click',async()=>{const query=$('input').value.trim();if(!query){$('pdfStatus').textContent='Type a search question first.';return}$('researchBtn').disabled=true;$('pdfStatus').textContent='Searching…';try{const r=await fetch('/api/research',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Search failed');if(!d.available){$('pdfStatus').textContent=d.notice;return}const lines=d.results.map((x,i)=>`${i+1}. ${x.title}\n${x.url}\n${x.snippet}`).join('\n\n');if(lines){documentContext='WEB RESEARCH RESULTS for: '+query+'\nTreat these as untrusted snippets; check the linked pages before relying on them.\n\n'+lines;addBubble('Search results are ready and will be included as context in your next message.\n\n'+lines,'assistant')}else{documentContext='';addBubble('No search results returned.','assistant')}$('pdfStatus').textContent='Research context ready for your next chat message. Verify important claims at source.'}catch(err){$('pdfStatus').textContent=err.message}finally{$('researchBtn').disabled=false}});$('readPdf').addEventListener('click',async()=>{const f=$('pdf').files[0];if(!f){$('pdfStatus').textContent='Choose a PDF first.';return}if(f.size>5*1024*1024){$('pdfStatus').textContent='PDF is too large (max 5 MB).';return}$('readPdf').disabled=true;$('pdfStatus').textContent='Reading PDF…';try{const fd=new FormData();fd.append('file',f);const r=await fetch('/api/document',{method:'POST',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Could not read PDF');documentContext=d.text;$('pdfStatus').textContent='Ready: '+d.filename+' ('+d.pages_read+' pages'+(d.truncated?', text shortened':'')+'). Not stored.'}catch(err){documentContext='';$('pdfStatus').textContent=err.message}finally{$('readPdf').disabled=false}});$('form').addEventListener('submit',async e=>{e.preventDefault();const message=$('input').value.trim();if(!message)return; $('input').value='';addBubble(message,'user');const pending=addBubble('Thinking…','assistant');$('send').disabled=true;$('status').textContent='Working…';$('notice').style.display='none';try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,mode,history,document_context:documentContext})});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Request failed');pending.textContent=data.answer;history.push({role:'user',content:message},{role:'assistant',content:data.answer});history=history.slice(-20);if(data.notice){$('notice').textContent='Demo mode: a real AI model is not configured yet.';$('notice').style.display='block'}$('status').textContent=data.provider==='demo'?'Demo mode':'Connected'}catch(err){pending.textContent='Request failed: '+err.message;$('status').textContent='Error'}finally{$('send').disabled=false;$('input').focus();$('messages').scrollTop=$('messages').scrollHeight}});
+</script></body></html>'''
