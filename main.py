@@ -1,4 +1,4 @@
-# main.py - Vishwa AI V4.0 - DOST MODE - FINAL RENDER FIXED
+ # main.py - Vishwa AI V4.0 - DOST MODE - FINAL RENDER FIXED
 import os
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
@@ -52,4 +52,42 @@ def health():
 
 @app.route('/')
 def index():
-    return render_template_string("""<!DOCTYPE html><html><head><title>Vishwa AI</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{background:#000;color:#fff;font-family:sans-serif;margin:0;display:flex;flex-direction:column;height:100vh}#chat{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column}.msg{margin:8px 0;padding:12px 16px;border-radius:18px;max-width:85%;word-wrap:break-word}.user{background:#1a73e8;align-self:flex-end}.ai{background:#222;align-self:flex-start}#inputArea{display:flex;padding:12px;background:#111;gap:8px}#plusBtn{font-size:24px;background:#222;border:none;color:#fff;width:44px;height:44px;border-radius:50%}#plusMenu{position:absolute;bottom:70px;left:12px;background:#222;border-radius:12px;padding:8px;display:none;flex-direction:column}#plusMenu button{background:none;border:none;color:#fff;padding:12px;text-align:left}#textInput
+    return render_template_string("""
+<!DOCTYPE html><html><head><title>Vishwa AI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{background:#000;color:#fff;font-family:sans-serif;margin:0;display:flex;flex-direction:column;height:100vh}#chat{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column}.msg{margin:8px 0;padding:12px 16px;border-radius:18px;max-width:85%;word-wrap:break-word}.user{background:#1a73e8;align-self:flex-end}.ai{background:#222;align-self:flex-start}#inputArea{display:flex;padding:12px;background:#111;gap:8px}#plusBtn{font-size:24px;background:#222;border:none;color:#fff;width:44px;height:44px;border-radius:50%}#plusMenu{position:absolute;bottom:70px;left:12px;background:#222;border-radius:12px;padding:8px;display:none;flex-direction:column}#plusMenu button{background:none;border:none;color:#fff;padding:12px;text-align:left}#textInput{flex:1;background:#222;border:none;color:#fff;padding:12px 16px;border-radius:24px;outline:none}</style>
+</head><body>
+<div id="chat"><div class="msg ai">Haan bhai! Main Vishwa, tera dost. Bol kya kaam hai? 😎</div></div>
+<div style="position:relative"><div id="plusMenu"><button onclick="triggerUpload('image')">Image</button><button onclick="triggerUpload('doc')">Document</button></div>
+<div id="inputArea"><button id="plusBtn" onclick="togglePlus()">+</button><input id="textInput" placeholder="Kuch bhi bol bhai..." onkeypress="if(event.key==='Enter')sendMsg()"><button onclick="sendMsg()" style="background:#1a73e8;border:none;color:#fff;padding:10px 18px;border-radius:20px">></button></div></div>
+<input type="file" id="fileInput" hidden onchange="handleFile(this)">
+<script>
+let plusOpen=false;function togglePlus(){plusOpen=!plusOpen;document.getElementById('plusMenu').style.display=plusOpen?'flex':'none'}
+function triggerUpload(t){const i=document.getElementById('fileInput');i.accept=t=='image'?'image/*':'.pdf,.docx,.txt';i.click();togglePlus()}
+async function handleFile(input){const file=input.files[0];if(!file)return;const chat=document.getElementById('chat');chat.innerHTML+=`<div class=msg user>📎 ${file.name}</div>`;const fd=new FormData();fd.append('file',file);fd.append('message',document.getElementById('textInput').value||'Is file ko dekh ke dost ki tarah bata');const res=await fetch('/upload',{method:'POST',body:fd});const data=await res.json();chat.innerHTML+=`<div class=msg ai>${data.reply}</div>`;chat.scrollTop=chat.scrollHeight}
+async function sendMsg(){const inp=document.getElementById('textInput');const txt=inp.value.trim();if(!txt)return;const chat=document.getElementById('chat');chat.innerHTML+=`<div class=msg user>${txt}</div>`;inp.value='';const res=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt,session_id:'default'})});const data=await res.json();chat.innerHTML+=`<div class=msg ai>${data.reply}</div>`;chat.scrollTop=chat.scrollHeight}
+</script></body></html>
+""")
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    data=request.json
+    chat_obj=get_chat_session(data.get('session_id','default'))
+    response=chat_obj.send_message(data.get('message'))
+    return jsonify({"reply": response.text})
+
+@app.route('/upload', methods=['POST'])
+def upload():
+    file=request.files.get('file')
+    user_msg=request.form.get('message','Is file ko dekh ke bata')
+    chat_obj=get_chat_session('default')
+    if file.filename.lower().endswith(('.png','.jpg','.jpeg','.webp')):
+        img=Image.open(file.stream)
+        response=chat_obj.send_message([user_msg, img])
+    else:
+        doc_text=read_document(file)
+        response=chat_obj.send_message(f"{user_msg}\n\nDocument:\n{doc_text}")
+    return jsonify({"reply": response.text})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
