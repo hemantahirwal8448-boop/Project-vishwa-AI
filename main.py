@@ -1,4 +1,4 @@
- # main.py - Vishwa AI V4.1 - SARI CHIJO WALA INTERFACE - 100% FIXED
+# main.py - Vishwa AI V4.3 - SARI CHIJO WALA + ERROR FIXED - FINAL
 import os
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
@@ -11,14 +11,23 @@ app = Flask(__name__)
 CORS(app)
 
 api_key = os.getenv("GEMINI_API_KEY")
+model = None
 if api_key:
-    genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-1.5-flash')
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        print("Model OK")
+    except Exception as e:
+        print("API Key Error:", e)
+else:
+    print("API Key Missing!")
 
 DOST_SYSTEM_PROMPT = "Tu Vishwa AI hai, tu user ka sabse accha DOST hai. Indore ka smart, samajhdar, funny dost hai. 'bhai', 'yaar' bol ke baat karta hai. Kabhi 'As an AI' mat bolna. Default Hinglish me baat kar."
 
 chat_sessions = {}
 def get_chat_session(sid):
+    if not model:
+        return None
     if sid not in chat_sessions:
         chat_sessions[sid] = model.start_chat(history=[
             {"role": "user", "parts": [DOST_SYSTEM_PROMPT]},
@@ -94,35 +103,4 @@ async function sendMsg(){
  var inp=document.getElementById('textInput'); var txt=inp.value.trim(); if(!txt) return;
  var chat=document.getElementById('chat'); chat.innerHTML+='<div class="msg user">'+txt+'</div>'; inp.value=''; chat.scrollTop=chat.scrollHeight;
  try{
-  var res=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt,session_id:'default'})});
-  var data=await res.json(); chat.innerHTML+='<div class="msg ai">'+data.reply+'</div>';
- }catch(e){ chat.innerHTML+='<div class="msg ai">Bhai network error</div>'; }
- chat.scrollTop=chat.scrollHeight;
-}
-document.getElementById('textInput').addEventListener('keypress',function(e){if(e.key==='Enter')sendMsg();});
-</script></body></html>
-"""
-    return render_template_string(html)
-
-@app.route('/chat', methods=['POST'])
-def chat_route():
-    data = request.json
-    sess = get_chat_session(data.get('session_id','default'))
-    resp = sess.send_message(data.get('message','hi'))
-    return jsonify({"reply": resp.text})
-
-@app.route('/upload', methods=['POST'])
-def upload_route():
-    f = request.files.get('file')
-    msg = request.form.get('message','Is file ko dekh ke bata')
-    sess = get_chat_session('default')
-    if f.filename.lower().endswith(('.png','.jpg','.jpeg','.webp')):
-        img = Image.open(f.stream)
-        resp = sess.send_message([msg, img])
-    else:
-        txt = read_document(f)
-        resp = sess.send_message(msg + "\n\nDocument:\n" + txt)
-    return jsonify({"reply": resp.text})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+  var res
