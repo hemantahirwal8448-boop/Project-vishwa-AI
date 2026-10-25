@@ -1,4 +1,4 @@
- # main.py - Vishwa AI V4.0 - DOST MODE - FINAL RENDER FIXED
+ # main.py - Vishwa AI V4.1 - SARI CHIJO WALA INTERFACE - 100% FIXED
 import os
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
@@ -10,41 +10,39 @@ from PIL import Image
 app = Flask(__name__)
 CORS(app)
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+api_key = os.getenv("GEMINI_API_KEY")
+if api_key:
+    genai.configure(api_key=api_key)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-DOST_SYSTEM_PROMPT = """
-Tu Vishwa AI hai, par tu robot nahi hai. Tu user ka sabse accha DOST hai.
-Tu Indore ka smart, samajhdar, funny dost hai. 'bhai', 'yaar' bol ke baat karta hai.
-Tu sirf jawab nahi deta, apne dimaag se sochta hai aur aage ka plan batata hai.
-Kabhi "As an AI" mat bolna. Jis language me user bole usi me bol. Default Hinglish.
-"""
+DOST_SYSTEM_PROMPT = "Tu Vishwa AI hai, tu user ka sabse accha DOST hai. Indore ka smart, samajhdar, funny dost hai. 'bhai', 'yaar' bol ke baat karta hai. Kabhi 'As an AI' mat bolna. Default Hinglish me baat kar."
 
 chat_sessions = {}
-def get_chat_session(session_id):
-    if session_id not in chat_sessions:
-        chat_sessions[session_id] = model.start_chat(history=[
+def get_chat_session(sid):
+    if sid not in chat_sessions:
+        chat_sessions[sid] = model.start_chat(history=[
             {"role": "user", "parts": [DOST_SYSTEM_PROMPT]},
             {"role": "model", "parts": ["Samajh gaya bhai! Ab se main tera dost Vishwa hu."]}
         ])
-    return chat_sessions[session_id]
+    return chat_sessions[sid]
 
-def read_document(file_storage):
-    filename = file_storage.filename.lower()
-    text = ""
+def read_document(f):
+    name = f.filename.lower()
+    txt = ""
     try:
-        if filename.endswith('.pdf'):
-            pdf_bytes = file_storage.read()
+        if name.endswith('.pdf'):
+            pdf_bytes = f.read()
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            for page in doc: text += page.get_text()
-        elif filename.endswith('.docx'):
-            d = docx.Document(file_storage)
-            text = "\n".join([p.text for p in d.paragraphs])
-        elif filename.endswith('.txt'):
-            text = file_storage.read().decode('utf-8')
+            for p in doc:
+                txt += p.get_text()
+        elif name.endswith('.docx'):
+            d = docx.Document(f)
+            txt = "\n".join([para.text for para in d.paragraphs])
+        elif name.endswith('.txt'):
+            txt = f.read().decode('utf-8', errors='ignore')
     except Exception as e:
-        text = f"Error: {e}"
-    return text[:15000]
+        txt = "Error: " + str(e)
+    return txt[:15000]
 
 @app.route('/health')
 def health():
@@ -52,42 +50,79 @@ def health():
 
 @app.route('/')
 def index():
-    return render_template_string("""
-<!DOCTYPE html><html><head><title>Vishwa AI</title>
+    html = """
+<!DOCTYPE html><html><head><title>Vishwa AI - Sari Chije Wala</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>body{background:#000;color:#fff;font-family:sans-serif;margin:0;display:flex;flex-direction:column;height:100vh}#chat{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column}.msg{margin:8px 0;padding:12px 16px;border-radius:18px;max-width:85%;word-wrap:break-word}.user{background:#1a73e8;align-self:flex-end}.ai{background:#222;align-self:flex-start}#inputArea{display:flex;padding:12px;background:#111;gap:8px}#plusBtn{font-size:24px;background:#222;border:none;color:#fff;width:44px;height:44px;border-radius:50%}#plusMenu{position:absolute;bottom:70px;left:12px;background:#222;border-radius:12px;padding:8px;display:none;flex-direction:column}#plusMenu button{background:none;border:none;color:#fff;padding:12px;text-align:left}#textInput{flex:1;background:#222;border:none;color:#fff;padding:12px 16px;border-radius:24px;outline:none}</style>
-</head><body>
-<div id="chat"><div class="msg ai">Haan bhai! Main Vishwa, tera dost. Bol kya kaam hai? 😎</div></div>
-<div style="position:relative"><div id="plusMenu"><button onclick="triggerUpload('image')">Image</button><button onclick="triggerUpload('doc')">Document</button></div>
-<div id="inputArea"><button id="plusBtn" onclick="togglePlus()">+</button><input id="textInput" placeholder="Kuch bhi bol bhai..." onkeypress="if(event.key==='Enter')sendMsg()"><button onclick="sendMsg()" style="background:#1a73e8;border:none;color:#fff;padding:10px 18px;border-radius:20px">></button></div></div>
+<style>
+body{background:#000;color:#fff;font-family:sans-serif;margin:0;display:flex;flex-direction:column;height:100vh}
+#chat{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column}
+.msg{margin:8px 0;padding:12px 16px;border-radius:18px;max-width:85%;word-wrap:break-word;white-space:pre-wrap}
+.user{background:#1a73e8;align-self:flex-end}
+.ai{background:#222;align-self:flex-start}
+#bottom{padding:12px;background:#111}
+#quickBtns{display:flex;gap:8px;margin-bottom:12px;overflow-x:auto}
+.qbtn{background:#222;border:1px solid #333;color:#fff;padding:8px 14px;border-radius:20px;white-space:nowrap;cursor:pointer;font-size:14px}
+#inputArea{display:flex;gap:8px;align-items:center}
+#textInput{flex:1;background:#222;border:none;color:#fff;padding:12px 16px;border-radius:24px;outline:none}
+#sendBtn{background:#1a73e8;border:none;color:#fff;padding:12px 18px;border-radius:20px;font-weight:bold}
+</style></head><body>
+<div id="chat"><div class="msg ai">Haan bhai! Main Vishwa, tera dost. Bol kya kaam hai? Photo, PDF sab bhej sakta hai ab.</div></div>
+<div id="bottom">
+<div id="quickBtns">
+<button class="qbtn" onclick="triggerUpload('image')">📷 Photo</button>
+<button class="qbtn" onclick="triggerUpload('doc')">📄 Document</button>
+<button class="qbtn" onclick="alert('Voice feature kal tak aa jayega bhai!')">🎤 Voice</button>
+<button class="qbtn" onclick="document.getElementById('textInput').value='Is photo ko samjha'; document.getElementById('textInput').focus()">🧠 Samjha</button>
+</div>
+<div id="inputArea"><input id="textInput" placeholder="Kuch bhi bol bhai..."><button id="sendBtn" onclick="sendMsg()">Send</button></div>
+</div>
 <input type="file" id="fileInput" hidden onchange="handleFile(this)">
 <script>
-let plusOpen=false;function togglePlus(){plusOpen=!plusOpen;document.getElementById('plusMenu').style.display=plusOpen?'flex':'none'}
-function triggerUpload(t){const i=document.getElementById('fileInput');i.accept=t=='image'?'image/*':'.pdf,.docx,.txt';i.click();togglePlus()}
-async function handleFile(input){const file=input.files[0];if(!file)return;const chat=document.getElementById('chat');chat.innerHTML+=`<div class=msg user>📎 ${file.name}</div>`;const fd=new FormData();fd.append('file',file);fd.append('message',document.getElementById('textInput').value||'Is file ko dekh ke dost ki tarah bata');const res=await fetch('/upload',{method:'POST',body:fd});const data=await res.json();chat.innerHTML+=`<div class=msg ai>${data.reply}</div>`;chat.scrollTop=chat.scrollHeight}
-async function sendMsg(){const inp=document.getElementById('textInput');const txt=inp.value.trim();if(!txt)return;const chat=document.getElementById('chat');chat.innerHTML+=`<div class=msg user>${txt}</div>`;inp.value='';const res=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt,session_id:'default'})});const data=await res.json();chat.innerHTML+=`<div class=msg ai>${data.reply}</div>`;chat.scrollTop=chat.scrollHeight}
+function triggerUpload(t){var i=document.getElementById('fileInput');if(t=='image'){i.accept='image/*';}else{i.accept='.pdf,.docx,.txt';}i.click();}
+async function handleFile(inp){
+ var file=inp.files[0]; if(!file) return;
+ var chat=document.getElementById('chat');
+ chat.innerHTML+='<div class="msg user">📎 File: '+file.name+'</div>'; chat.scrollTop=chat.scrollHeight;
+ var fd=new FormData(); fd.append('file',file); fd.append('message','Is file ko dost ki tarah samjha de bhai');
+ try{
+  var res=await fetch('/upload',{method:'POST',body:fd}); var data=await res.json();
+  chat.innerHTML+='<div class="msg ai">'+data.reply+'</div>'; 
+ }catch(e){ chat.innerHTML+='<div class="msg ai">Bhai file me error aa gaya: '+e+'</div>'; }
+ chat.scrollTop=chat.scrollHeight; inp.value='';
+}
+async function sendMsg(){
+ var inp=document.getElementById('textInput'); var txt=inp.value.trim(); if(!txt) return;
+ var chat=document.getElementById('chat'); chat.innerHTML+='<div class="msg user">'+txt+'</div>'; inp.value=''; chat.scrollTop=chat.scrollHeight;
+ try{
+  var res=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt,session_id:'default'})});
+  var data=await res.json(); chat.innerHTML+='<div class="msg ai">'+data.reply+'</div>';
+ }catch(e){ chat.innerHTML+='<div class="msg ai">Bhai network error</div>'; }
+ chat.scrollTop=chat.scrollHeight;
+}
+document.getElementById('textInput').addEventListener('keypress',function(e){if(e.key==='Enter')sendMsg();});
 </script></body></html>
-""")
+"""
+    return render_template_string(html)
 
 @app.route('/chat', methods=['POST'])
-def chat():
-    data=request.json
-    chat_obj=get_chat_session(data.get('session_id','default'))
-    response=chat_obj.send_message(data.get('message'))
-    return jsonify({"reply": response.text})
+def chat_route():
+    data = request.json
+    sess = get_chat_session(data.get('session_id','default'))
+    resp = sess.send_message(data.get('message','hi'))
+    return jsonify({"reply": resp.text})
 
 @app.route('/upload', methods=['POST'])
-def upload():
-    file=request.files.get('file')
-    user_msg=request.form.get('message','Is file ko dekh ke bata')
-    chat_obj=get_chat_session('default')
-    if file.filename.lower().endswith(('.png','.jpg','.jpeg','.webp')):
-        img=Image.open(file.stream)
-        response=chat_obj.send_message([user_msg, img])
+def upload_route():
+    f = request.files.get('file')
+    msg = request.form.get('message','Is file ko dekh ke bata')
+    sess = get_chat_session('default')
+    if f.filename.lower().endswith(('.png','.jpg','.jpeg','.webp')):
+        img = Image.open(f.stream)
+        resp = sess.send_message([msg, img])
     else:
-        doc_text=read_document(file)
-        response=chat_obj.send_message(f"{user_msg}\n\nDocument:\n{doc_text}")
-    return jsonify({"reply": response.text})
+        txt = read_document(f)
+        resp = sess.send_message(msg + "\n\nDocument:\n" + txt)
+    return jsonify({"reply": resp.text})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
