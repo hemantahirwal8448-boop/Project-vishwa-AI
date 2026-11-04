@@ -1,171 +1,276 @@
-# main.py - Vishwa AI V4.4 - DEPLOY FIXED - FINAL
+"""
+Project Vishwa AI — Flask single-file starter
+Environment variables on Render:
+  AI_BASE_URL=https://api.groq.com/openai/v1
+  AI_API_KEY=your_secret_api_key
+  AI_MODEL=openai/gpt-oss-20b
+Optional:
+  PORT (Render sets this automatically)
+
+This is a working AI chat/file-reading starter, not a finished authentication/payment
+platform. Google login and email/SMS OTP require separate OAuth/email/SMS providers.
+"""
 import os
-from flask import Flask, request, jsonify
+import io
+import logging
+from collections import defaultdict
+
+import requests
+from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
-import google.generativeai as genai
-import fitz
-import docx
-from PIL import Image
+
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    fitz = None
+try:
+    import docx
+except ImportError:
+    docx = None
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 app = Flask(__name__)
 CORS(app)
+app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024
+logging.basicConfig(level=logging.INFO)
 
-api_key = os.getenv("GEMINI_API_KEY")
-model = None
-if api_key:
+BASE_URL = os.getenv("AI_BASE_URL", "https://api.groq.com/openai/v1").strip().rstrip("/")
+API_KEY = os.getenv("AI_API_KEY", "").strip()
+MODEL = os.getenv("AI_MODEL", "openai/gpt-oss-20b").strip()
+TIMEOUT = 60
+MAX_HISTORY = 16
+histories = defaultdict(list)
+
+SYSTEM_PROMPT = """You are Project Vishwa AI, a helpful and honest assistant.
+Reply in the language the user uses, including Hindi or Hinglish. Give clear,
+useful answers. Do not claim you performed actions you did not perform. Be honest
+about uncertainty. Never reveal secrets, API keys, or internal configuration."""
+
+
+def read_file(file):
+    name = (file.filename or "").lower()
+    raw = file.read()
+    if name.endswith(".pdf"):
+        if fitz is None:
+            raise ValueError("PDF support missing. Add PyMuPDF to requirements.txt.")
+        pdf = fitz.open(stream=raw, filetype="pdf")
+        return "\n".join(page.get_text() for page in pdf)[:18000]
+    if name.endswith(".docx"):
+        if docx is None:
+            raise ValueError("DOCX support missing. Add python-docx to requirements.txt.")
+        document = docx.Document(io.BytesIO(raw))
+        return "\n".join(p.text for p in document.paragraphs)[:18000]
+    if name.endswith((".txt", ".md", ".csv", ".json", ".py", ".html", ".xml")):
+        return raw.decode("utf-8", errors="replace")[:18000]
+    raise ValueError("Supported files: PDF, DOCX, TXT, MD, CSV, JSON, PY, HTML, XML.")
+
+
+def ask_ai(messages):
+    if not API_KEY:
+        raise RuntimeError("AI_API_KEY Render Environment में सेट नहीं है.")
+    if not BASE_URL.startswith("https://"):
+        raise RuntimeError("AI_BASE_URL में provider का HTTPS API base URL रखें.")
+    url = BASE_URL + "/chat/completions"
+    payload = {
+        "model": MODEL,
+        "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+        "temperature": 0.7,
+        "max_tokens": 2048,
+    }
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-    except Exception as e:
-        print("Key Error:", e)
+        r = requests.post(
+            url,
+            headers={"Authorization": "Bearer " + API_KEY, "Content-Type": "application/json"},
+            json=payload,
+            timeout=TIMEOUT,
+        )
+    except requests.Timeout:
+        raise RuntimeError("AI provider ने समय पर जवाब नहीं दिया. फिर प्रयास करें.")
+    except requests.RequestException:
+        raise RuntimeError("AI provider से कनेक्शन नहीं हुआ. AI_BASE_URL जाँचें.")
 
-DOST_PROMPT = "Tu Vishwa AI hai, Indore ka dost hai. Bhai yaar bol ke baat kar. Hinglish me jawab de."
-
-chat_sessions = {}
-def get_chat_session(sid):
-    if not model:
-        return None
-    if sid not in chat_sessions:
-        chat_sessions[sid] = model.start_chat(history=[
-            {"role": "user", "parts": [DOST_PROMPT]},
-            {"role": "model", "parts": ["Samajh gaya bhai! Main Vishwa hu."]}
-        ])
-    return chat_sessions[sid]
-
-def read_doc(f):
-    name = f.filename.lower()
-    txt = ""
-    try:
-        if name.endswith('.pdf'):
-            data = f.read()
-            doc = fitz.open(stream=data, filetype="pdf")
-            for p in doc:
-                txt += p.get_text()
-        elif name.endswith('.docx'):
-            d = docx.Document(f)
-            txt = "\n".join([para.text for para in d.paragraphs])
+    if r.status_code >= 400:
+        if r.status_code in (401, 403):
+            msg = "API key गलत है या provider ने अनुमति नहीं दी. AI_API_KEY जाँचें."
+        elif r.status_code == 404:
+            msg = "मॉडल या API endpoint नहीं मिला. AI_BASE_URL और AI_MODEL जाँचें."
+        elif r.status_code == 429:
+            msg = "Provider की rate limit या quota पूरी है. कुछ देर बाद प्रयास करें."
         else:
-            txt = f.read().decode('utf-8', errors='ignore')
-    except Exception as e:
-        txt = str(e)
-    return txt[:12000]
+            msg = f"AI provider ने HTTP {r.status_code} दिया. Render Logs देखें."
+        # Log response detail without logging the API key.
+        app.logger.warning("Provider error %s: %s", r.status_code, r.text[:300])
+        raise RuntimeError(msg)
+    try:
+        data = r.json()
+        answer = data["choices"][0]["message"]["content"]
+        if isinstance(answer, list):
+            answer = "\n".join(x.get("text", "") for x in answer if isinstance(x, dict))
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError()
+        return answer.strip()
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise RuntimeError("Provider का जवाब समझ नहीं आया. AI_MODEL और provider compatibility जाँचें.")
 
-@app.route('/health')
+
+@app.get("/health")
 def health():
-    return "ok", 200
+    return jsonify({"status": "ok", "app": "Project Vishwa AI", "version": "5.0"})
 
-@app.route('/')
-def index():
-    return '''
-<!DOCTYPE html>
-<html>
-<head>
-<title>Vishwa AI</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-body{background:#000;color:#fff;font-family:sans-serif;margin:0;display:flex;flex-direction:column;height:100vh}
-#chat{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column}
-.msg{margin:8px 0;padding:12px 16px;border-radius:18px;max-width:85%;word-wrap:break-word;white-space:pre-wrap}
-.user{background:#1a73e8;align-self:flex-end}
-.ai{background:#222;align-self:flex-start}
-#bottom{padding:12px;background:#111}
-#quickBtns{display:flex;gap:8px;margin-bottom:12px;overflow-x:auto}
-.qbtn{background:#222;border:1px solid #333;color:#fff;padding:8px 14px;border-radius:20px;cursor:pointer}
-#inputArea{display:flex;gap:8px}
-#textInput{flex:1;background:#222;border:none;color:#fff;padding:12px 16px;border-radius:24px;outline:none}
-#sendBtn{background:#1a73e8;border:none;color:#fff;padding:12px 18px;border-radius:20px}
-</style>
-</head>
-<body>
-<div id="chat"><div class="msg ai">Haan bhai! Main Vishwa, tera dost. Bol kya kaam hai? Photo, PDF sab bhej sakta hai ab.</div></div>
-<div id="bottom">
-<div id="quickBtns">
-<button class="qbtn" onclick="triggerUpload('image')">Photo</button>
-<button class="qbtn" onclick="triggerUpload('doc')">Document</button>
-<button class="qbtn" onclick="alert('Voice kal aayega bhai')">Voice</button>
-</div>
-<div id="inputArea">
-<input id="textInput" placeholder="Kuch bhi bol bhai...">
-<button id="sendBtn" onclick="sendMsg()">Send</button>
-</div>
-</div>
-<input type="file" id="fileInput" hidden onchange="handleFile(this)">
-<script>
-function triggerUpload(t){
-  var i=document.getElementById('fileInput');
-  if(t=='image'){i.accept='image/*';} else {i.accept='.pdf,.docx,.txt';}
-  i.click();
-}
-async function handleFile(inp){
-  var file=inp.files[0]; if(!file) return;
-  var chat=document.getElementById('chat');
-  chat.innerHTML+='<div class="msg user">File: '+file.name+'</div>';
-  chat.scrollTop=chat.scrollHeight;
-  var fd=new FormData();
-  fd.append('file',file);
-  fd.append('message','Is file ko dost ki tarah samjha');
-  try{
-    var res=await fetch('/upload',{method:'POST',body:fd});
-    var data=await res.json();
-    chat.innerHTML+='<div class="msg ai">'+data.reply+'</div>';
-  }catch(e){
-    chat.innerHTML+='<div class="msg ai">Upload error: '+e+'</div>';
-  }
-  chat.scrollTop=chat.scrollHeight;
-  inp.value='';
-}
-async function sendMsg(){
-  var inp=document.getElementById('textInput');
-  var txt=inp.value.trim();
-  if(!txt) return;
-  var chat=document.getElementById('chat');
-  chat.innerHTML+='<div class="msg user">'+txt+'</div>';
-  inp.value='';
-  chat.scrollTop=chat.scrollHeight;
-  try{
-    var res=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt,session_id:'default'})});
-    var data=await res.json();
-    chat.innerHTML+='<div class="msg ai">'+data.reply+'</div>';
-  }catch(e){
-    chat.innerHTML+='<div class="msg ai">Network error: '+e+'</div>';
-  }
-  chat.scrollTop=chat.scrollHeight;
-}
-document.getElementById('textInput').addEventListener('keypress',function(e){if(e.key==='Enter')sendMsg();});
-</script>
-</body>
-</html>
-'''
 
-@app.route('/chat', methods=['POST'])
-def chat_route():
+@app.get("/api/status")
+def status():
+    return jsonify({
+        "app": "Project Vishwa AI",
+        "version": "5.0",
+        "api_key_configured": bool(API_KEY),
+        "model": MODEL,
+        "auth": "not configured",
+        "note": "Google login/OTP need OAuth and email/SMS provider setup."
+    })
+
+
+@app.get("/")
+def home():
+    return render_template_string(HTML, model=MODEL)
+
+
+@app.post("/chat")
+@app.post("/api/chat")
+def chat():
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("message", "")).strip()
+    sid = str(data.get("session_id", "default"))[:80]
+    if not text:
+        return jsonify({"reply": "अपना सवाल लिखें."}), 400
+    if len(text) > 12000:
+        return jsonify({"reply": "सवाल बहुत लंबा है. छोटा करके भेजें."}), 413
+    histories[sid].append({"role": "user", "content": text})
+    histories[sid] = histories[sid][-MAX_HISTORY:]
     try:
-        data = request.json
-        sess = get_chat_session(data.get('session_id','default'))
-        if not sess:
-            return jsonify({"reply": "Bhai GEMINI_API_KEY Render me set nahi hai. Render > Environment me ja ke nayi key daal. aistudio.google.com/app/apikey se free milti hai."})
-        resp = sess.send_message(data.get('message','hi'))
-        return jsonify({"reply": resp.text})
-    except Exception as e:
-        return jsonify({"reply": "Error: " + str(e)[:300]})
+        answer = ask_ai(histories[sid])
+        histories[sid].append({"role": "assistant", "content": answer})
+        histories[sid] = histories[sid][-MAX_HISTORY:]
+        return jsonify({"reply": answer, "model": MODEL})
+    except RuntimeError as e:
+        if histories[sid] and histories[sid][-1]["role"] == "user":
+            histories[sid].pop()
+        return jsonify({"reply": str(e)}), 502
+    except Exception:
+        app.logger.exception("Unexpected chat error")
+        return jsonify({"reply": "तकनीकी समस्या आई. बाद में फिर प्रयास करें."}), 500
 
-@app.route('/upload', methods=['POST'])
-def upload_route():
+
+@app.post("/upload")
+@app.post("/api/upload")
+def upload():
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"reply": "पहले कोई फ़ाइल चुनें."}), 400
+    sid = str(request.form.get("session_id", "default"))[:80]
+    prompt = str(request.form.get("message", "इस फ़ाइल को हिंदी में समझाएँ."))[:1500]
     try:
-        f = request.files.get('file')
-        msg = request.form.get('message','Is file ko dekh ke bata')
-        sess = get_chat_session('default')
-        if not sess:
-            return jsonify({"reply": "API Key missing hai bhai, Environment me check kar."})
-        if f.filename.lower().endswith(('.png','.jpg','.jpeg','.webp')):
-            img = Image.open(f.stream)
-            resp = sess.send_message([msg, img])
+        name = f.filename.lower()
+        if name.endswith((".png", ".jpg", ".jpeg", ".webp")):
+            # Vision support differs by provider; encode image as a data URL.
+            import base64
+            raw = f.read()
+            mime = f.mimetype or "image/jpeg"
+            content = [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": "data:" + mime + ";base64," + base64.b64encode(raw).decode("ascii")}}
+            ]
+            messages = histories[sid][-MAX_HISTORY:] + [{"role": "user", "content": content}]
         else:
-            txt = read_doc(f)
-            resp = sess.send_message(msg + "\n\nDocument:\n" + txt)
-        return jsonify({"reply": resp.text})
-    except Exception as e:
-        return jsonify({"reply": "Upload Error: " + str(e)[:300]})
+            text = read_file(f)
+            messages = histories[sid][-MAX_HISTORY:] + [{
+                "role": "user",
+                "content": prompt + "\n\nफ़ाइल: " + f.filename + "\n\nसामग्री:\n" + (text or "(पढ़ने योग्य टेक्स्ट नहीं मिला)")
+            }]
+        answer = ask_ai(messages)
+        histories[sid].append({"role": "user", "content": prompt + " [uploaded " + f.filename + "]"})
+        histories[sid].append({"role": "assistant", "content": answer})
+        histories[sid] = histories[sid][-MAX_HISTORY:]
+        return jsonify({"reply": answer, "filename": f.filename, "model": MODEL})
+    except (RuntimeError, ValueError) as e:
+        return jsonify({"reply": str(e)}), 502
+    except Exception:
+        app.logger.exception("Upload error")
+        return jsonify({"reply": "फ़ाइल पढ़ने या भेजने में समस्या आई."}), 500
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+
+@app.post("/api/model-check")
+def model_check():
+    try:
+        answer = ask_ai([{"role": "user", "content": "Reply with OK only."}])
+        return jsonify({"connected": True, "model": MODEL, "notice": "AI connection successful.", "reply": answer[:80]})
+    except RuntimeError as e:
+        return jsonify({"connected": False, "model": MODEL, "notice": str(e)}), 502
+
+
+@app.post("/api/new-chat")
+def new_chat():
+    data = request.get_json(silent=True) or {}
+    sid = str(data.get("session_id", "default"))[:80]
+    histories.pop(sid, None)
+    return jsonify({"ok": True, "reply": "नई चैट शुरू हो गई."})
+
+
+@app.errorhandler(413)
+def too_large(_error):
+    return jsonify({"reply": "फ़ाइल 15 MB से बड़ी है. छोटी फ़ाइल भेजें."}), 413
+
+
+HTML = r"""
+<!doctype html><html lang="hi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#090d16">
+<title>Project Vishwa AI</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#090d16;color:#f4f6fb;font:16px system-ui,sans-serif;height:100dvh;display:flex;flex-direction:column}
+header{padding:14px 16px;background:#101827;border-bottom:1px solid #263246;display:flex;justify-content:space-between;align-items:center}
+.brand{font-size:19px;font-weight:750}.sub{font-size:12px;color:#a9b6ca;margin-top:3px}
+button{cursor:pointer;border:1px solid #334155;border-radius:12px;background:#1b293d;color:white;padding:9px 12px}
+#chat{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px;width:100%;max-width:900px;margin:auto}
+.msg{max-width:90%;padding:12px 15px;border-radius:17px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
+.user{align-self:flex-end;background:#2563eb}.ai{align-self:flex-start;background:#182334;border:1px solid #29384d}
+.actions{display:flex;gap:7px;margin-top:8px}.actions button{font-size:12px;padding:5px 9px}
+#composer{background:#0e1522;border-top:1px solid #29384d;padding:12px;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+#tools,#form{max-width:900px;margin:0 auto;display:flex;gap:7px}#tools{overflow:auto;margin-bottom:10px}
+#form textarea{flex:1;min-width:0;max-height:130px;resize:vertical;background:#182334;color:white;border:1px solid #334155;border-radius:15px;padding:12px;font:inherit}
+.primary{background:#2563eb;border-color:#2563eb;font-weight:bold}.note{text-align:center;font-size:11px;color:#8492a8;margin-top:8px}
+#file{display:none}@media(max-width:520px){#tools button{white-space:nowrap;padding:8px;font-size:13px}.msg{max-width:95%}}
+</style></head><body>
+<header><div><div class="brand">🌐 Project Vishwa AI</div><div class="sub">AI मॉडल: {{ model }}</div></div><button onclick="newChat()">नई चैट</button></header>
+<main id="chat"><div class="msg ai">नमस्ते! मैं Vishwa AI हूँ। अपना सवाल हिंदी, Hinglish या English में पूछें। आप दस्तावेज़ भी अपलोड कर सकते हैं।</div></main>
+<section id="composer"><div id="tools">
+<button onclick="pick('image/*')">📷 फोटो</button><button onclick="pick('.pdf,.docx,.txt,.md,.csv,.json,.py,.html,.xml')">📄 फ़ाइल</button>
+<button onclick="voice()">🎙️ बोलें</button><button onclick="toggleRead()">🔊 आवाज़: <span id="read">बंद</span></button><button onclick="check()">कनेक्शन जाँचें</button>
+</div><form id="form" onsubmit="send(event)"><textarea id="input" rows="1" placeholder="अपना सवाल लिखें…"></textarea><button class="primary" id="send">भेजें</button></form>
+<input id="file" type="file" hidden><div class="note">AI गलतियाँ कर सकता है। महत्वपूर्ण जानकारी की पुष्टि करें।</div></section>
+<script>
+const chatBox=document.getElementById('chat'),input=document.getElementById('input');
+let sid=localStorage.getItem('vishwa_sid')||'v-'+Math.random().toString(36).slice(2);localStorage.setItem('vishwa_sid',sid);
+let busy=false,readAloud=false;
+function add(text,who){let d=document.createElement('div');d.className='msg '+who;let t=document.createElement('div');t.textContent=text;d.appendChild(t);
+if(who==='ai'){let a=document.createElement('div');a.className='actions';let c=document.createElement('button');c.textContent='कॉपी';c.onclick=()=>navigator.clipboard?.writeText(text);let s=document.createElement('button');s.textContent='🔊 सुनें';s.onclick=()=>speak(text);a.append(c,s);d.appendChild(a);if(readAloud)speak(text);}
+chatBox.appendChild(d);chatBox.scrollTop=chatBox.scrollHeight;return d;}
+function setBusy(x){busy=x;document.getElementById('send').disabled=x;document.getElementById('send').textContent=x?'रुकें…':'भेजें';}
+async function send(e){if(e)e.preventDefault();let message=input.value.trim();if(!message||busy)return;add(message,'user');input.value='';setBusy(true);let wait=add('जवाब तैयार हो रहा है…','ai');
+try{let r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,session_id:sid})});let d=await r.json();wait.remove();add(d.reply||'जवाब नहीं मिला.','ai');}
+catch(err){wait.remove();add('नेटवर्क समस्या. इंटरनेट जाँचकर फिर कोशिश करें.','ai');}finally{setBusy(false);}}
+function pick(accept){let f=document.getElementById('file');f.accept=accept;f.click();}
+document.getElementById('file').onchange=async e=>{let f=e.target.files[0];if(!f)return;if(busy)return;add('फ़ाइल: '+f.name,'user');setBusy(true);let w=add('फ़ाइल पढ़ी जा रही है…','ai');let fd=new FormData();fd.append('file',f);fd.append('session_id',sid);fd.append('message','इस फ़ाइल या फोटो को ध्यान से देखकर हिंदी में समझाओ।');try{let r=await fetch('/api/upload',{method:'POST',body:fd});let d=await r.json();w.remove();add(d.reply||'जवाब नहीं मिला.','ai');}catch(err){w.remove();add('फ़ाइल भेजने में समस्या.','ai');}finally{setBusy(false);e.target.value='';}};
+function speak(text){if(!('speechSynthesis'in window)){add('इस ब्राउज़र में आवाज़ उपलब्ध नहीं है.','ai');return;}speechSynthesis.cancel();let u=new SpeechSynthesisUtterance(text);u.lang=/[\\u0900-\\u097F]/.test(text)?'hi-IN':'en-US';u.rate=1;speechSynthesis.speak(u);}
+function toggleRead(){readAloud=!readAloud;document.getElementById('read').textContent=readAloud?'चालू':'बंद';}
+function voice(){let SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){add('इस ब्राउज़र में आवाज़ पहचान उपलब्ध नहीं है. Chrome माइक्रोफ़ोन अनुमति जाँचें.','ai');return;}let r=new SR();r.lang='hi-IN';r.onresult=e=>{input.value=e.results[0][0].transcript;input.focus();};r.onerror=()=>add('आवाज़ पहचान नहीं पाई. माइक्रोफ़ोन अनुमति जाँचें.','ai');r.start();}
+async function check(){let w=add('AI कनेक्शन जाँचा जा रहा है…','ai');try{let r=await fetch('/api/model-check',{method:'POST'});let d=await r.json();w.remove();add(d.notice||'जाँच पूरी हुई.','ai');}catch(e){w.remove();add('कनेक्शन जाँच नहीं हो सकी.','ai');}}
+async function newChat(){try{await fetch('/api/new-chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:sid})});}catch(e){}chatBox.innerHTML='';add('नई चैट शुरू हो गई. अपना सवाल लिखें.','ai');}
+input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+</script></body></html>
+"""
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")))
