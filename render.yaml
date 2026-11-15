@@ -2,10 +2,15 @@ services:
   - type: web
     name: project-vishwa-ai
     runtime: python
-    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
+    startCommand: gunicorn main:app --workers 1 --threads 4 --timeout 90
+    plan: free
     envVars:
-      - key: ENABLE_FEEDBACK_STORAGE
-        value: "false"
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: AI_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: AI_MODEL
+        value: openai/gpt-oss-20b
+      - key: FLASK_SECRET_KEY
+        generateValue: true

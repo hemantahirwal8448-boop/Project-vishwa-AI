@@ -1,0 +1,43 @@
+PROJECT VISHWA AI — ANDROID / ANDROID TV SOURCE
+================================================
+इस पैकेज में Android phone और Android TV के लिए एक ही Kotlin WebView wrapper project है। यह ऐप आपकी live website https://project-vishwa-ai.onrender.com/ खोलता है। वेबसाइट/backend का कोड अलग से project root में है।
+
+इसमें क्या है
+-------------
+- Android Studio project: android/
+- Android phone launcher entry
+- Android TV Leanback launcher entry (एक ही app build)
+- Remote/D-pad focus navigation के लिए WebView
+- File picker bridge
+- Microphone permission bridge (browser/WebView support पर निर्भर)
+- HTTPS-only website loading
+- GitHub Actions workflow: .github/workflows/android.yml
+
+महत्वपूर्ण सीमा
+---------------
+यह Android source project है, compiled APK/AAB नहीं। Google OAuth को WebView में सीधे fully supported न मानें: Google embedded WebView sign-in रोक सकता है और external browser session WebView में साझा नहीं होता। Play Store release से पहले native OAuth/Custom Tabs callback integration और Razorpay checkout compatibility को वास्तविक फोन/TV पर verify करना होगा। इस runtime में Android SDK/Gradle build environment उपलब्ध नहीं था, इसलिए APK/AAB compile/sign या वास्तविक Android TV device test नहीं हुआ।
+यह Android TV target करता है। Samsung Tizen TV और LG webOS के native app packages इसमें शामिल नहीं हैं; उनके लिए अलग platform apps चाहिए।
+
+फोन/TV app build करने का आसान तरीका — GitHub Actions
+---------------------------------------------------
+1. इस ZIP की सभी files/folders GitHub repository के ROOT में upload करें।
+2. GitHub repository खोलें → Settings → Secrets and variables → Actions → New repository secret.
+3. Play Store release के लिए ये 4 secrets जोड़ें:
+   ANDROID_KEYSTORE_BASE64 = अपने upload keystore की Base64 string
+   ANDROID_KEYSTORE_PASSWORD = keystore password
+   ANDROID_KEY_ALIAS = key alias
+   ANDROID_KEY_PASSWORD = key password
+4. Actions tab → “Build Android and Android TV app” → Run workflow.
+5. सफल build के बाद workflow artifact `vishwa-android-builds` डाउनलोड करें। Debug APK testing के लिए है; Play Store के लिए signed release AAB चाहिए।
+
+Keystore सुरक्षा
+----------------
+Keystore/password को GitHub code, ZIP, chat या public repository में कभी commit न करें। Keystore की सुरक्षित offline backup रखें। खोने पर future updates में समस्या हो सकती है।
+
+Android Studio से build
+----------------------
+1. Android Studio में android/ folder खोलें।
+2. Gradle sync पूरा होने दें (internet चाहिए)।
+3. Testing: Build → Build Bundle(s) / APK(s) → Build APK(s).
+4. Play Store: Build → Generate Signed Bundle / APK → Android App Bundle चुनें; release key से sign करें।
+5. Android TV पर वास्तविक remote/device testing करें।

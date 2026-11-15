@@ -1,0 +1,8 @@
+3.3.0-global — Website/PWA + Android/Android TV source bundle.
+- Added installable PWA manifest, app icons, offline shell and service worker.
+- Added Kotlin WebView wrapper for Android phone and Android TV launcher, file picker and D-pad-friendly support.
+- Added GitHub Actions workflow for debug APK and optional signed release AAB build.
+- Added basic per-IP/per-endpoint SQLite rate limiting and removed unnecessary permissive CORS setup.
+- Added public privacy-policy template route; owner contact placeholders must be replaced before launch.
+- Added Android build, signing, Play Console and deployment instructions.
+- External services still require user-owned API credentials/accounts; no compiled APK/AAB or store publication is included.

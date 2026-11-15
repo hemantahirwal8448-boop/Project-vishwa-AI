@@ -1,0 +1,31 @@
+आपको क्या करना है — Project Vishwa AI Combo 3.3
+================================================
+पहले: ZIP को Extract करें। Extracted folder के अंदर की सभी files और folders GitHub repository के ROOT में upload करें। ZIP को सीधे upload न करें। Root में main.py, requirements.txt, render.yaml, templates, static, android और .github दिखने चाहिए।
+
+दूसरा: Render में ये जरूरी Environment Variables डालें:
+AI_BASE_URL=https://api.groq.com/openai/v1
+AI_API_KEY=अपनी निजी AI provider key
+AI_MODEL=provider में उपलब्ध model id
+FLASK_SECRET_KEY=Render Generate Value
+COOKIE_SECURE=true
+
+तीसरा: Render deploy के बाद ये URLs खोलकर जाँचें:
+https://project-vishwa-ai.onrender.com/health
+https://project-vishwa-ai.onrender.com/api/status
+https://project-vishwa-ai.onrender.com/privacy
+AI Chat में test message भेजें और Model Check चलाएँ।
+
+चौथा: केवल जिन सुविधाओं को चालू करना है, उनकी निजी keys Render Environment में जोड़ें:
+- Email OTP: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
+- Google Login: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
+- Web Research: SEARCH_API_KEY
+- Admin: ADMIN_EMAILS
+- Payment: Razorpay test keys और PAYMENT_AMOUNT_PAISE
+
+पाँचवाँ: स्थायी Chat History चाहिए तो Render Persistent Disk या managed PostgreSQL configure/migrate करें। Free ephemeral disk पर permanent history न मानें।
+
+छठा: Android APK/AAB के लिए GitHub Actions खोलें। Debug APK workflow से बन सकता है। Play Store AAB के लिए signing keystore बनाएँ और चार GitHub Actions secrets जोड़ें: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD. Keystore और passwords सुरक्षित रखें।
+
+सातवाँ: Play Store के लिए Google Play Console developer account, app listing, screenshots, content rating, data safety form, privacy policy URL, support contact, signed AAB और device testing आपको करनी होगी।
+
+ध्यान दें: यह Android phone + Android TV wrapper source है। Samsung Tizen और LG webOS के लिए अलग apps बनेंगे। इस ZIP में कोई prebuilt APK/AAB या Play Store publication शामिल नहीं है। Privacy page पर [OWNER LEGAL NAME] और [SUPPORT EMAIL] बदलना अनिवार्य है।
