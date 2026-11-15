@@ -241,7 +241,7 @@ button{cursor:pointer;border:1px solid #334155;border-radius:12px;background:#1b
 #tools,#form{max-width:900px;margin:0 auto;display:flex;gap:7px}#tools{overflow:auto;margin-bottom:10px}
 #form textarea{flex:1;min-width:0;max-height:130px;resize:vertical;background:#182334;color:white;border:1px solid #334155;border-radius:15px;padding:12px;font:inherit}
 .primary{background:#2563eb;border-color:#2563eb;font-weight:bold}.note{text-align:center;font-size:11px;color:#8492a8;margin-top:8px}
-#file{display:none}@media(max-width:520px){#tools button{white-space:nowrap;padding:8px;font-size:13px}.msg{max-width:95%}}
+#file{display:none}@media(max-width:520px){ #tools button{white-space:nowrap;padding:8px;font-size:13px}.msg{max-width:95%}}
 </style></head><body>
 <header><div><div class="brand">🌐 Project Vishwa AI</div><div class="sub">AI मॉडल: {{ model }}</div></div><button onclick="newChat()">नई चैट</button></header>
 <main id="chat"><div class="msg ai">नमस्ते! मैं Vishwa AI हूँ। अपना सवाल हिंदी, Hinglish या English में पूछें। आप दस्तावेज़ भी अपलोड कर सकते हैं।</div></main>
